@@ -1,0 +1,37 @@
+[
+  {
+    "id": "q001",
+    "question": "What is the capital of France?",
+    "expected_answer": "Paris",
+    "tags": ["factual", "geography"],
+    "expected_keywords": ["Paris"]
+  },
+  {
+    "id": "q002",
+    "question": "Explain what a Python decorator is in one sentence.",
+    "expected_answer": "A decorator is a function that wraps another function to modify or extend its behavior without changing its source code.",
+    "tags": ["technical", "python"],
+    "expected_keywords": ["function", "wrap", "behavior"]
+  },
+  {
+    "id": "q003",
+    "question": "What are three benefits of using a REST API?",
+    "expected_answer": "Three benefits of REST APIs are: statelessness (each request is independent), scalability (servers can be scaled horizontally), and interoperability (any client can communicate using HTTP).",
+    "tags": ["technical", "api"],
+    "expected_keywords": ["stateless", "scalab", "interop"]
+  },
+  {
+    "id": "q004",
+    "question": "Summarize the water cycle in two sentences.",
+    "expected_answer": "Water evaporates from oceans and lakes, rises as vapor, and condenses into clouds. It then falls as precipitation and flows back to bodies of water through rivers and groundwater.",
+    "tags": ["science", "summarization"],
+    "expected_keywords": ["evapor", "condens", "precipit"]
+  },
+  {
+    "id": "q005",
+    "question": "What does SOLID stand for in software engineering?",
+    "expected_answer": "SOLID stands for Single responsibility, Open-closed, Liskov substitution, Interface segregation, and Dependency inversion principles.",
+    "tags": ["technical", "software-design"],
+    "expected_keywords": ["Single", "Open", "Liskov", "Interface", "Dependency"]
+  }
+]

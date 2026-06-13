@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LLM Eval Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --blue: #58a6ff; --purple: #bc8cff;
+    --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+  header { border-bottom: 1px solid var(--border); padding: 20px 32px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
+  .badge-green { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .badge-red   { background: rgba(248,81,73,.15);  color: var(--red);   border: 1px solid rgba(248,81,73,.3); }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 32px; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 8px; }
+  .kpi-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); }
+  .kpi-value.good   { color: var(--green); }
+  .kpi-value.warn   { color: var(--yellow); }
+  .kpi-value.bad    { color: var(--red); }
+  .kpi-value.neutral{ color: var(--blue); }
+
+  h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 32px; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+  td { padding: 14px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-family: var(--font-mono); background: rgba(88,166,255,.1); color: var(--blue); border: 1px solid rgba(88,166,255,.2); margin: 2px; }
+  .pill-ok   { color: var(--green); }
+  .pill-hall { color: var(--red); }
+
+  .bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .bar-bg   { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .bar-val  { font-family: var(--font-mono); font-size: 12px; width: 38px; text-align: right; color: var(--muted); }
+
+  .answer-cell { max-width: 260px; }
+  .answer-cell details summary { cursor: pointer; color: var(--blue); font-size: 12px; }
+  .answer-cell p { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+
+  #file-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 40px; text-align: center; margin-bottom: 32px; cursor: pointer; transition: border-color .2s; }
+  #file-zone:hover { border-color: var(--blue); }
+  #file-zone p { color: var(--muted); font-size: 14px; }
+  #file-input { display: none; }
+
+  .section { margin-bottom: 40px; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5" fill="#58a6ff"/><rect x="14" y="3" width="7" height="7" rx="1.5" fill="#3fb950"/><rect x="3" y="14" width="7" height="7" rx="1.5" fill="#d29922"/><rect x="14" y="14" width="7" height="7" rx="1.5" fill="#bc8cff"/></svg>
+  <h1>LLM Eval Dashboard</h1>
+  <span id="status-badge" class="badge" style="display:none"></span>
+  <span id="run-time" style="margin-left:auto;font-size:12px;color:var(--muted)"></span>
+</header>
+
+<main>
+  <div id="file-zone" onclick="document.getElementById('file-input').click()">
+    <p>📂 Drop <code>evals/results.json</code> here or click to load</p>
+    <input type="file" id="file-input" accept=".json" />
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <div class="section">
+      <div class="kpi-grid" id="kpi-grid"></div>
+    </div>
+
+    <div class="section">
+      <h2>Per-Question Results</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Question</th>
+            <th>Tags</th>
+            <th>Answer</th>
+            <th>Status</th>
+            <th>Relevancy</th>
+            <th>Hit Rate</th>
+            <th>Latency</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+
+    <div class="section" id="failures-section" style="display:none">
+      <h2>⚠️ Gate Failures</h2>
+      <ul id="failures-list" style="color:var(--red);font-size:14px;line-height:2;padding-left:20px"></ul>
+    </div>
+  </div>
+</main>
+
+<script>
+const fileZone = document.getElementById("file-zone");
+const fileInput = document.getElementById("file-input");
+
+fileZone.addEventListener("dragover", e => { e.preventDefault(); fileZone.style.borderColor = "var(--blue)"; });
+fileZone.addEventListener("dragleave", () => { fileZone.style.borderColor = "var(--border)"; });
+fileZone.addEventListener("drop", e => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener("change", e => loadFile(e.target.files[0]));
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => renderDashboard(JSON.parse(e.target.result));
+  reader.readAsText(file);
+}
+
+function colorClass(val, good, warn) {
+  if (val <= good) return "good";
+  if (val <= warn) return "warn";
+  return "bad";
+}
+
+function bar(val, max, color) {
+  const pct = Math.min(100, (val / max) * 100);
+  return `<div class="bar-wrap">
+    <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+    <span class="bar-val">${val}</span>
+  </div>`;
+}
+
+function renderDashboard(data) {
+  fileZone.style.display = "none";
+  document.getElementById("dashboard").style.display = "block";
+
+  const agg = data.aggregate;
+  const badge = document.getElementById("status-badge");
+  badge.style.display = "inline";
+  badge.textContent = data.gates_passed ? "✅ PASSED" : "❌ BLOCKED";
+  badge.className = "badge " + (data.gates_passed ? "badge-green" : "badge-red");
+
+  document.getElementById("run-time").textContent = new Date(data.run_at).toLocaleString();
+
+  // KPIs
+  const kpis = [
+    { label: "Hallucination Rate", value: agg.hallucination_rate_pct + "%", cls: colorClass(agg.hallucination_rate_pct, 10, 20) },
+    { label: "p50 Latency",        value: agg.p50_latency_ms + "ms",        cls: colorClass(agg.p50_latency_ms, 1500, 3000) },
+    { label: "p95 Latency",        value: agg.p95_latency_ms + "ms",        cls: colorClass(agg.p95_latency_ms, 3000, 5000) },
+    { label: "Avg Relevancy",      value: agg.avg_relevancy.toFixed(3),      cls: agg.avg_relevancy >= 0.5 ? "good" : agg.avg_relevancy >= 0.35 ? "warn" : "bad" },
+    { label: "Total Cost",         value: "$" + agg.total_cost_usd,          cls: "neutral" },
+    { label: "Questions",          value: agg.total_questions,               cls: "neutral" },
+  ];
+
+  document.getElementById("kpi-grid").innerHTML = kpis.map(k =>
+    `<div class="kpi"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.cls}">${k.value}</div></div>`
+  ).join("");
+
+  // Table
+  const tbody = document.getElementById("results-body");
+  tbody.innerHTML = data.results.map(r => {
+    const tags = (r.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
+    const status = r.hallucination_flag
+      ? `<span class="pill-hall">❌ Hallucination</span>`
+      : `<span class="pill-ok">✅ OK</span>`;
+    const relColor = r.answer_relevancy >= 0.5 ? "var(--green)" : r.answer_relevancy >= 0.3 ? "var(--yellow)" : "var(--red)";
+    const hitColor = r.keyword_hit_rate >= 0.75 ? "var(--green)" : r.keyword_hit_rate >= 0.5 ? "var(--yellow)" : "var(--red)";
+    return `<tr>
+      <td><code style="font-family:var(--font-mono);font-size:12px;color:var(--purple)">${r.id}</code></td>
+      <td style="max-width:200px;font-size:12px">${r.question}</td>
+      <td>${tags}</td>
+      <td class="answer-cell"><details><summary>View answer</summary><p>${r.actual_answer}</p></details></td>
+      <td>${status}</td>
+      <td>${bar(r.answer_relevancy.toFixed(2), 1, relColor)}</td>
+      <td>${bar(r.keyword_hit_rate.toFixed(2), 1, hitColor)}</td>
+      <td style="font-family:var(--font-mono);font-size:12px">${r.latency_ms}ms</td>
+      <td style="font-family:var(--font-mono);font-size:12px">$${r.cost_usd}</td>
+    </tr>`;
+  }).join("");
+
+  // Gate failures
+  if (data.failures && data.failures.length) {
+    document.getElementById("failures-section").style.display = "block";
+    document.getElementById("failures-list").innerHTML =
+      data.failures.map(f => `<li>${f}</li>`).join("");
+  }
+}
+</script>
+</body>
+</html>
