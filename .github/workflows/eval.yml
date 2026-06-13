@@ -1,0 +1,132 @@
+name: LLM Eval CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main", "dev"]
+    paths:
+      # Re-run evals whenever any of these change
+      - "src/**"
+      - "evals/golden_dataset.json"
+      - ".github/workflows/eval.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "evals/golden_dataset.json"
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Gemini model to evaluate"
+        required: false
+        default: "gemini-1.5-flash"
+        type: choice
+        options:
+          - gemini-1.5-flash
+          - gemini-1.5-pro
+          - gemini-2.0-flash
+
+jobs:
+  # ── Job 1: Unit tests (fast, free, no API key needed) ──────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: pytest tests/ -v --tb=short
+
+  # ── Job 2: LLM Eval (runs after unit tests pass) ───────────────────────────
+  llm-eval:
+    name: LLM Quality Evaluation
+    runs-on: ubuntu-latest
+    needs: unit-tests          # only run if tests pass
+    environment: eval          # protects the secret on PRs from forks
+
+    env:
+      GEMINI_MODEL: ${{ github.event.inputs.model || 'gemini-1.5-flash' }}
+      # Quality gate thresholds (override via repo vars if needed)
+      GATE_HALLUCINATION_MAX: "20"   # %
+      GATE_P95_LATENCY_MAX: "5000"   # ms
+      GATE_RELEVANCY_MIN: "0.4"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run LLM evaluation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        working-directory: src
+        run: |
+          python eval_runner.py \
+            --dataset ../evals/golden_dataset.json \
+            --output  ../evals/results.json
+
+      - name: Upload eval results as artifact
+        if: always()           # upload even on failure so you can inspect
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_number }}
+          path: evals/results.json
+          retention-days: 30
+
+      - name: Post summary to GitHub Step Summary
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os, pathlib
+
+          data = json.loads(pathlib.Path("evals/results.json").read_text())
+          agg  = data["aggregate"]
+          ok   = data["gates_passed"]
+
+          lines = [
+            f"## {'✅ Eval Passed' if ok else '❌ Eval Failed — Merge Blocked'}",
+            "",
+            "### Aggregate Metrics",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Hallucination Rate | {agg['hallucination_rate_pct']}% |",
+            f"| p50 Latency | {agg['p50_latency_ms']} ms |",
+            f"| p95 Latency | {agg['p95_latency_ms']} ms |",
+            f"| Avg Relevancy | {agg['avg_relevancy']} |",
+            f"| Total Cost | ${agg['total_cost_usd']} |",
+          ]
+
+          if data["failures"]:
+            lines += ["", "### Gate Failures"]
+            for f in data["failures"]:
+              lines.append(f"- ❌ {f}")
+
+          pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text("\n".join(lines))
+          EOF
+
+      # Fail the job if gates didn't pass (eval_runner.py exits 1, but
+      # we re-check here so the summary step above can still run)
+      - name: Enforce quality gates
+        run: |
+          python - <<'EOF'
+          import json, sys, pathlib
+          data = json.loads(pathlib.Path("evals/results.json").read_text())
+          sys.exit(0 if data["gates_passed"] else 1)
+          EOF
